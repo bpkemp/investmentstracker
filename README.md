@@ -31,7 +31,27 @@ pip install -r requirements.txt
 python consolidate.py
 ```
 
+Or pass CSV files/directories directly:
+
+```bash
+python consolidate.py /path/to/cmc_2024.csv /path/to/commsec_folder
+```
+
 The master ledger is written to `portfolio_tracker/output/master_ledger.csv`.
+If that file already exists, it is loaded first and the new run is appended/deduplicated, so previous consolidated output is built on instead of replaced.
+
+### Compiling CLI to EXE
+
+```bash
+cd portfolio_tracker
+pyinstaller --onefile --name "PortfolioConsolidatorCLI" consolidate.py
+```
+
+Run the EXE with CSVs:
+
+```bash
+PortfolioConsolidatorCLI.exe C:\exports\cmc.csv C:\exports\commsec.csv --output C:\exports\master_ledger.csv
+```
 
 ## Desktop GUI
 
@@ -78,4 +98,5 @@ To add a new broker, add an entry to the `BROKER_MAPPINGS` dictionary in `consol
 
 - **DRP Handling** — Dividend Reinvestment, DRP, and Reinvestment transactions are captured and normalised to `Buy` for accurate cost-base tracking.
 - **Idempotent** — Deduplication on `[Date, Ticker, Units, Broker]` means you can re-drop overlapping CSVs without inflating the ledger.
+- **Incremental output** — Existing `master_ledger.csv` is loaded first so each run extends prior consolidated history.
 - **Multi-broker** — Broker is auto-detected from the filename; column mappings are applied per broker.
