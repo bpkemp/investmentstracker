@@ -1,0 +1,12 @@
+# Python caches
+__pycache__/
+*.pyc
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Application Data
+portfolio_tracker/output/
+portfolio_tracker/raw_data/

@@ -8,17 +8,22 @@ Tracks stock parcels using First-In-First-Out (FIFO) logic to calculate:
 """
 
 import os
+import sys
 import json
 import pandas as pd
+
+def get_config_path(filename: str) -> str:
+    """Get absolute path to config file, works for dev and for PyInstaller"""
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, "config", filename)
 from datetime import datetime
 
 def load_cpi_data() -> dict[str, float]:
     """Load quarterly CPI data from config/cpi.json."""
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config",
-        "cpi.json"
-    )
+    config_path = get_config_path("cpi.json")
     if not os.path.exists(config_path):
         return {}
     try:

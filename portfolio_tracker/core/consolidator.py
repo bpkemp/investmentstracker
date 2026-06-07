@@ -7,8 +7,17 @@ Supports broker-agnostic custom column mapping.
 
 import json
 import os
+import sys
 import glob
 import pandas as pd
+
+def get_config_path(filename: str) -> str:
+    """Get absolute path to config file, works for dev and for PyInstaller"""
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, "config", filename)
 
 # Default columns for master ledger
 MASTER_COLUMNS = [
@@ -31,11 +40,7 @@ SELL_TYPES = {"SELL", "SALE", "DISPOSAL", "DISPOSE"}
 
 def load_broker_mappings() -> dict:
     """Load broker configurations from brokers.json config file."""
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config",
-        "brokers.json"
-    )
+    config_path = get_config_path("brokers.json")
     if not os.path.exists(config_path):
         return {}
     try:
@@ -46,11 +51,7 @@ def load_broker_mappings() -> dict:
 
 def add_broker_mapping(broker_key: str, broker_id: str, columns: dict) -> None:
     """Save a new broker configuration mapping back to brokers.json."""
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config",
-        "brokers.json"
-    )
+    config_path = get_config_path("brokers.json")
     data = load_broker_mappings()
     data[broker_key] = {
         "broker_id": broker_id,
