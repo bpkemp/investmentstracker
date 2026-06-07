@@ -1,0 +1,35 @@
+{
+  "cmc": {
+    "broker_id": "CMC",
+    "columns": {
+      "Trade Date": "Date",
+      "Stock": "Ticker",
+      "Transaction": "Type",
+      "Quantity": "Units",
+      "Price": "Price",
+      "Brokerage": "Brokerage"
+    }
+  },
+  "commsec": {
+    "broker_id": "COMMSEC",
+    "columns": {
+      "Date": "Date",
+      "Code": "Ticker",
+      "Type": "Type",
+      "Quantity": "Units",
+      "Unit Price ($)": "Price",
+      "Brokerage+GST ($)": "Brokerage"
+    }
+  },
+  "betashares": {
+    "broker_id": "BETASHARES",
+    "columns": {
+      "Date": "Date",
+      "Ticker": "Ticker",
+      "Type": "Type",
+      "Units": "Units",
+      "Price": "Price",
+      "Brokerage": "Brokerage"
+    }
+  }
+}

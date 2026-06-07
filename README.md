@@ -1,102 +1,117 @@
-# investmentstracker
+# ASX Portfolio Consolidator & Tax Tracker
 
-Consolidates historical ASX share trading CSVs from multiple Australian brokers into a single master ledger for tax tracking and Google Sheets import. Available as a CLI pipeline or a standalone desktop GUI.
+Consolidates historical ASX share trading CSVs from multiple Australian brokers into a single master ledger for tax tracking, current holdings cost base calculations, and capital gains tax (CGT) reporting. Available as a unified CLI command or a standalone desktop GUI.
 
 ## Project Structure
 
 ```
-portfolio_tracker/           # CLI pipeline
-  raw_data/                  # Drop broker CSV exports here
-  output/                    # Generated master_ledger.csv
-  consolidate.py
-  requirements.txt
+portfolio_tracker/
+  ├── config/
+  │    └── brokers.json         # Externalised broker column mappings
+  ├── core/
+  │    ├── consolidator.py      # Core consolidation & cleaning logic
+  │    └── tax.py               # FIFO capital gains and holdings tracker
+  ├── cli.py                    # CLI entry point
+  ├── gui.py                    # CustomTkinter GUI entry point
+  └── tests/
+       └── test_consolidator.py # Unit tests
+requirements.txt                # Unified requirements
+setup.py                        # Package installation setup
+```
 
-portfolio_tracker_gui/       # Desktop GUI (CustomTkinter)
-  app.py
-  requirements.txt
+## Installation
+
+Install the required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Alternatively, you can install the package in editable mode:
+
+```bash
+pip install -e .
 ```
 
 ## CLI Pipeline
 
-```bash
-cd portfolio_tracker
-pip install -r requirements.txt
-```
-
-1. Export trade history CSVs from your brokers (CMC, CommSec, Betashares, etc.).
-2. Drop them into `portfolio_tracker/raw_data/`. The filename **must** contain the broker key (e.g. `cmc_trades_2024.csv`, `commsec_export.csv`, `betashares_history.csv`).
-3. Run the pipeline:
+Run the pipeline using the python module syntax:
 
 ```bash
-python consolidate.py
+python -m portfolio_tracker.cli [options] [csv_files...]
 ```
 
-Or pass CSV files/directories directly:
+If you installed the package via `setup.py`, you can run the console script directly:
 
 ```bash
-python consolidate.py /path/to/cmc_2024.csv /path/to/commsec_folder
+portfolio-consolidate [options] [csv_files...]
 ```
 
-The master ledger is written to `portfolio_tracker/output/master_ledger.csv`.
-If that file already exists, it is loaded first and the new run is appended/deduplicated, so previous consolidated output is built on instead of replaced.
+### Positional Arguments
+*   `csv_files`: Optional CSV files or directories. If omitted, the tool scans the default `--input-dir` (`portfolio_tracker/raw_data/`).
 
-### Compiling CLI to EXE
+### Options
+*   `--input-dir`: Directory scanned for CSV files when no positional files are provided.
+*   `--output`: Output path for the consolidated master ledger CSV (default: `portfolio_tracker/output/master_ledger.csv`).
+*   `--holdings`: Optional path to export the current holdings summary CSV (units held, average cost, total invested).
+*   `--cgt`: Optional path to export the FIFO realized capital gains tax report CSV (gain calculations and 50% discount eligibility).
+
+### Example
 
 ```bash
-cd portfolio_tracker
-pyinstaller --onefile --name "PortfolioConsolidatorCLI" consolidate.py
+python -m portfolio_tracker.cli C:\exports\cmc.csv C:\exports\commsec_folder --output output/ledger.csv --holdings output/holdings.csv --cgt output/cgt.csv
 ```
 
-Run the EXE with CSVs:
-
-```bash
-PortfolioConsolidatorCLI.exe C:\exports\cmc.csv C:\exports\commsec.csv --output C:\exports\master_ledger.csv
-```
+---
 
 ## Desktop GUI
 
-```bash
-cd portfolio_tracker_gui
-pip install -r requirements.txt
-python app.py
-```
-
-The GUI lets you select CSV files via a file picker, process them, and save the consolidated ledger to any location.
-
-### Compiling to Executable
+Run the GUI tool:
 
 ```bash
-pyinstaller --onefile --noconsole --collect-data customtkinter --name "PortfolioConsolidator" app.py
+python -m portfolio_tracker.gui
 ```
 
-The compiled binary will be in `dist/PortfolioConsolidator.exe`.
+Or run the script if installed:
+
+```bash
+portfolio-consolidate-gui
+```
+
+### GUI Features
+*   **Multi-Broker CSV picker**: Load multiple files at once.
+*   **Merge with existing ledger**: Check this box to select your existing master ledger and append/deduplicate new files into it.
+*   **Tabbed Dashboard**: View your consolidated ledger preview, current portfolio holdings summary, and FIFO realized CGT details instantly.
+*   **Dashboard Cards**: Highlight total holdings, invested capital, and realized capital gains.
+*   **Multi-file Save**: Saving the consolidated ledger will automatically export `holdings_summary.csv` and `cgt_report.csv` into the same directory.
+
+---
 
 ## Supported Brokers
 
-| Broker Key | Expected CSV Columns |
-|---|---|
-| `cmc` | Trade Date, Stock, Transaction, Quantity, Price, Brokerage |
-| `commsec` | Date, Code, Details, Units, Average Price, Brokerage (inc GST) |
-| `betashares` | Date, Ticker, Type, Units, Price, Brokerage |
+Column configurations are stored externally in [brokers.json](file:///C:/dev/investmentstracker/portfolio_tracker/config/brokers.json). The broker is auto-detected from the CSV header columns.
 
-To add a new broker, add an entry to the `BROKER_MAPPINGS` dictionary in `consolidate.py` or `app.py`.
+Default supported brokers:
+*   `CMC` (expected columns: Trade Date, Stock, Transaction, Quantity, Price, Brokerage)
+*   `CommSec` (expected columns: Date, Code, Type, Quantity, Unit Price ($), Brokerage+GST ($))
+*   `Betashares` (expected columns: Date, Ticker, Type, Units, Price, Brokerage)
 
-## Master Schema
+To add a new broker or modify columns, simply append an entry to [brokers.json](file:///C:/dev/investmentstracker/portfolio_tracker/config/brokers.json) without changing Python code.
 
-| Column | Format |
-|---|---|
-| Date | `YYYY-MM-DD` |
-| Ticker | `ASX:<CODE>` (`.AX` suffix stripped) |
-| Type | `Buy` (DRPs and reinvestments normalised) |
-| Units | Float |
-| Price | Float |
-| Brokerage | Float (defaults to 0) |
-| Broker | Uppercase identifier |
-| Total_Cost | `(Units × Price) + Brokerage` |
+---
 
-## Key Features
+## Tax base tracking and CGT rules
 
-- **DRP Handling** — Dividend Reinvestment, DRP, and Reinvestment transactions are captured and normalised to `Buy` for accurate cost-base tracking.
-- **Idempotent** — Deduplication on `[Date, Ticker, Units, Broker]` means you can re-drop overlapping CSVs without inflating the ledger.
-- **Incremental output** — Existing `master_ledger.csv` is loaded first so each run extends prior consolidated history.
-- **Multi-broker** — Broker is auto-detected from the filename; column mappings are applied per broker.
+*   **Buy & Sell Support**: Full tracking of both purchase types (Buys, DRPs, reinvestments) and sales (Sells, disposals).
+*   **FIFO matching**: Sells are matched against the oldest available Buy parcels.
+*   **50% CGT discount**: Calculates holding periods and marks discount eligibility for the current 2026-27 FY (requires assets to be held for *more than* 12 months before disposal).
+
+---
+
+## Development & Testing
+
+Run unit tests using the module syntax:
+
+```bash
+python -m portfolio_tracker.tests.test_consolidator
+```
