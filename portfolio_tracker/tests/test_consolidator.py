@@ -1,5 +1,5 @@
 """
-Unit Tests for Portfolio Consolidator & Tax Tracker
+Unit Tests for Portfolio Tracker
 """
 
 import os
@@ -9,9 +9,6 @@ from portfolio_tracker.core.consolidator import (
     clean_numeric,
     standardise_ticker,
     standardise_transaction_type,
-    identify_broker,
-    load_broker_mappings,
-    add_broker_mapping
 )
 from portfolio_tracker.core.tax import PortfolioTracker
 
@@ -35,30 +32,6 @@ def test_standardise_transaction_type():
     assert standardise_transaction_type("Sell") == "Sell"
     assert standardise_transaction_type("Sale") == "Sell"
     assert standardise_transaction_type("unknown") is None
-
-def test_identify_broker():
-    broker_mappings = load_broker_mappings()
-    
-    # CMC columns
-    cmc_cols = ["Trade Date", "Stock", "Transaction", "Quantity", "Price", "Brokerage", "Extra Col"]
-    key, mapping = identify_broker(cmc_cols, broker_mappings)
-    assert key == "cmc"
-    assert mapping["broker_id"] == "CMC"
-
-    # CommSec columns
-    commsec_cols = ["Date", "Code", "Type", "Quantity", "Unit Price ($)", "Brokerage+GST ($)"]
-    key, mapping = identify_broker(commsec_cols, broker_mappings)
-    assert key == "commsec"
-    assert mapping["broker_id"] == "COMMSEC"
-
-    # Betashares columns
-    beta_cols = ["Date", "Ticker", "Type", "Units", "Price", "Brokerage"]
-    key, mapping = identify_broker(beta_cols, broker_mappings)
-    assert key == "betashares"
-    assert mapping["broker_id"] == "BETASHARES"
-
-    # Unknown
-    assert identify_broker(["A", "B", "C"], broker_mappings) is None
 
 def test_fifo_tax_tracker():
     # Setup a mock ledger
@@ -136,60 +109,6 @@ def test_fifo_tax_tracker():
     assert p2["Discount_Eligible"] == "No"
     assert p2["Discounted_Gain"] == 293.50
 
-def test_add_broker_mapping():
-    original = load_broker_mappings()
-    test_cols = {"Col1": "Date", "Col2": "Ticker"}
-    try:
-        add_broker_mapping("test_temp", "TEST_TEMP", test_cols)
-        updated = load_broker_mappings()
-        assert "test_temp" in updated
-        assert updated["test_temp"]["broker_id"] == "TEST_TEMP"
-        assert updated["test_temp"]["columns"] == test_cols
-    finally:
-        # Restore original configuration
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config",
-            "brokers.json"
-        )
-        import json
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(original, f, indent=2)
-
-def test_process_csv_with_custom_mapping():
-    import tempfile
-    import os
-    from portfolio_tracker.core.consolidator import process_csv_files
-    
-    fd, path = tempfile.mkstemp(suffix=".csv")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write("When,StockCode,Action,Qty,PriceEach\n")
-            f.write("01/06/2026,CBA.AX,Buy,10.5,100.0\n")
-        
-        custom_mapping = {
-            path: {
-                "broker_id": "CUSTOM_MOCK",
-                "columns": {
-                    "When": "Date",
-                    "StockCode": "Ticker",
-                    "Action": "Type",
-                    "Qty": "Units",
-                    "PriceEach": "Price"
-                }
-            }
-        }
-        
-        master, raw, dupes, warnings = process_csv_files([path], custom_mappings=custom_mapping)
-        assert len(master) == 1
-        assert master.iloc[0]["Ticker"] == "ASX:CBA"
-        assert master.iloc[0]["Broker"] == "CUSTOM_MOCK"
-        assert master.iloc[0]["Units"] == 10.5
-        assert master.iloc[0]["Price"] == 100.0
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
-
 def test_fifo_tax_tracker_indexation():
     # Setup mock ledger containing a sale after 1 July 2027
     ledger_data = [
@@ -241,12 +160,6 @@ if __name__ == "__main__":
     test_clean_numeric()
     test_standardise_ticker()
     test_standardise_transaction_type()
-    test_identify_broker()
     test_fifo_tax_tracker()
-    test_add_broker_mapping()
-    test_process_csv_with_custom_mapping()
     test_fifo_tax_tracker_indexation()
     print("All tests passed successfully!")
-
-
-

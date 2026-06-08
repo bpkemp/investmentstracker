@@ -217,7 +217,7 @@ class PortfolioTracker:
         summary = []
         for ticker, parcels in self.holdings.items():
             total_units = sum(p["units"] for p in parcels)
-            if total_units <= 0:
+            if total_units < 0.0001:  # Filter out closed positions and float dust
                 continue
             total_cost = sum(p["total_cost"] for p in parcels)
             avg_price = total_cost / total_units

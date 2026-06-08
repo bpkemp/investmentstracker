@@ -1,26 +1,21 @@
 """
-Multi-Broker Portfolio Consolidator - Desktop GUI
-=================================================
-Consolidates ASX broker CSV exports into a single master ledger, computes current
-holdings, and displays realized FIFO capital gains with 50% CGT discount status.
-Supports broker-agnostic custom column mapping and manual transaction entry.
+Portfolio Tracker - Desktop GUI
+===============================
+Manages a master ledger of stock transactions via manual entry,
+computes current holdings, and displays realized FIFO capital gains
+with 50% CGT discount status.
 """
 
 from __future__ import annotations
 
 import os
-import threading
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import pandas as pd
 
 from portfolio_tracker.core.consolidator import (
-    process_csv_files,
     load_existing_master,
-    identify_broker,
-    find_header_row,
-    add_broker_mapping,
-    load_broker_mappings,
+    import_raw_csv,
     standardise_ticker,
     DEDUP_SUBSET,
     MASTER_COLUMNS
@@ -35,146 +30,6 @@ COLOR_GREEN_HOVER = "#1E7F6B"
 COLOR_BG_DARK = "#1E1E24"
 COLOR_CARD_DARK = "#282830"
 
-class ColumnMappingDialog(ctk.CTkToplevel):
-    """Modal dialog to map CSV columns to the master ledger schema."""
-    def __init__(self, parent: ctk.CTk, filepath: str) -> None:
-        super().__init__(parent)
-        self.filepath = filepath
-        self.result_mapping = None  # Stores {"broker_id": broker_id, "columns": col_map}
-        
-        self.title("Map CSV Columns")
-        self.geometry("460x520")
-        self.resizable(False, False)
-        
-        # Read CSV headers
-        self.headers = self._read_headers()
-        
-        # Make modal
-        self.transient(parent)
-        self.grab_set()
-        
-        self._build_ui()
-        
-    def _read_headers(self) -> list[str]:
-        """Try to read CSV headers skipping metadata rows."""
-        try:
-            with open(self.filepath, "r", encoding="utf-8-sig") as f:
-                for line in f:
-                    fields = [h.strip().strip('"') for h in line.split(",") if h.strip()]
-                    if len(fields) >= 4:
-                        return fields
-        except Exception:
-            pass
-        return []
-
-    def _build_ui(self) -> None:
-        self.grid_columnconfigure((0, 1), weight=1, uniform="col")
-        
-        # Header Info
-        lbl_info = ctk.CTkLabel(
-            self,
-            text=f"Unrecognized File:\n{os.path.basename(self.filepath)}\n\nPlease map the CSV columns to the ledger fields:",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            justify="center"
-        )
-        lbl_info.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 15), sticky="ew")
-        
-        # Broker Name Input
-        ctk.CTkLabel(self, text="Broker ID / Name:", font=ctk.CTkFont(size=12, weight="bold")).grid(row=1, column=0, padx=20, pady=8, sticky="w")
-        self.ent_broker = ctk.CTkEntry(self, placeholder_text="e.g. Pearler")
-        self.ent_broker.grid(row=1, column=1, padx=20, pady=8, sticky="ew")
-        
-        # Create mapping fields
-        self.dropdowns: dict[str, ctk.CTkOptionMenu] = {}
-        fields = ["Date", "Ticker", "Type", "Units", "Price", "Brokerage"]
-        
-        options = ["(Select Column)"] + self.headers
-        
-        for idx, field in enumerate(fields, start=2):
-            label_text = f"{field} Column:"
-            if field == "Brokerage":
-                label_text += " (Optional)"
-                
-            ctk.CTkLabel(self, text=label_text, font=ctk.CTkFont(size=12)).grid(row=idx, column=0, padx=20, pady=6, sticky="w")
-            
-            menu = ctk.CTkOptionMenu(self, values=options, fg_color=COLOR_CARD_DARK)
-            menu.grid(row=idx, column=1, padx=20, pady=6, sticky="ew")
-            self.dropdowns[field] = menu
-            
-            # Simple heuristic matching
-            lower_headers = [h.lower() for h in self.headers]
-            field_l = field.lower()
-            best_match = None
-            
-            # Find best string match
-            for h_idx, h in enumerate(lower_headers):
-                if field_l in h or (field_l == "ticker" and "stock" in h or "code" in h) or (field_l == "type" and "transaction" in h):
-                    best_match = self.headers[h_idx]
-                    break
-            if best_match:
-                menu.set(best_match)
-
-        # Save mapping checkbox
-        self.chk_save_var = ctk.StringVar(value="on")
-        self.chk_save = ctk.CTkCheckBox(self, text="Save mapping for future auto-detection", variable=self.chk_save_var, onvalue="on", offvalue="off")
-        self.chk_save.grid(row=8, column=0, columnspan=2, padx=20, pady=15)
-        
-        # Error text
-        self.lbl_error = ctk.CTkLabel(self, text="", text_color="red", font=ctk.CTkFont(size=12))
-        self.lbl_error.grid(row=9, column=0, columnspan=2, padx=20, pady=2)
-
-        # Apply button
-        btn_apply = ctk.CTkButton(
-            self,
-            text="Apply Mapping",
-            command=self._on_apply,
-            fg_color=COLOR_GREEN,
-            hover_color=COLOR_GREEN_HOVER,
-            font=ctk.CTkFont(weight="bold")
-        )
-        btn_apply.grid(row=10, column=0, columnspan=2, padx=20, pady=(10, 20), sticky="ew")
-
-    def _on_apply(self) -> None:
-        broker_id = self.ent_broker.get().strip()
-        if not broker_id:
-            self.lbl_error.configure(text="Please enter a Broker ID / Name.")
-            return
-
-        col_map = {}
-        # Core columns must be selected
-        required = ["Date", "Ticker", "Type", "Units", "Price"]
-        selected_csv_cols = []
-        
-        for field in required:
-            sel = self.dropdowns[field].get()
-            if sel == "(Select Column)":
-                self.lbl_error.configure(text=f"Please select a column for {field}.")
-                return
-            col_map[sel] = field
-            selected_csv_cols.append(sel)
-
-        # Check for duplicate column selections
-        if len(set(selected_csv_cols)) != len(selected_csv_cols):
-            self.lbl_error.configure(text="Duplicate selections. Each field must map to a unique column.")
-            return
-
-        # Optional Brokerage
-        brokerage_col = self.dropdowns["Brokerage"].get()
-        if brokerage_col != "(Select Column)":
-            col_map[brokerage_col] = "Brokerage"
-
-        self.result_mapping = {
-            "broker_id": broker_id.upper(),
-            "columns": col_map
-        }
-        
-        # Save mapping back to config if checked
-        if self.chk_save_var.get() == "on":
-            broker_key = broker_id.lower().replace(" ", "_")
-            add_broker_mapping(broker_key, broker_id.upper(), col_map)
-
-        self.destroy()
-
 
 class App(ctk.CTk):
     def __init__(self) -> None:
@@ -188,8 +43,6 @@ class App(ctk.CTk):
         self.minsize(900, 550)
 
         # State Variables
-        self._selected_files: list[str] = []
-        self._existing_ledger_path: str = ""
         self._master_df: pd.DataFrame | None = None
         self._holdings_df: pd.DataFrame | None = None
         self._cgt_df: pd.DataFrame | None = None
@@ -208,12 +61,12 @@ class App(ctk.CTk):
         left_panel = ctk.CTkFrame(self, width=320, corner_radius=0, fg_color=COLOR_BG_DARK)
         left_panel.grid(row=0, column=0, sticky="nsew")
         left_panel.grid_columnconfigure(0, weight=1)
-        left_panel.grid_rowconfigure(8, weight=1) # Spacer row
+        left_panel.grid_rowconfigure(7, weight=1) # Spacer row
 
         # Title
         lbl_title = ctk.CTkLabel(
             left_panel,
-            text="Portfolio Consolidator",
+            text="Portfolio Tracker",
             font=ctk.CTkFont(size=20, weight="bold", family="Helvetica"),
             anchor="w"
         )
@@ -221,74 +74,63 @@ class App(ctk.CTk):
 
         lbl_subtitle = ctk.CTkLabel(
             left_panel,
-            text="ASX Multi-Broker Ledger & CGT tool",
+            text="ASX Ledger & CGT Tool",
             font=ctk.CTkFont(size=12, slant="italic"),
             text_color="gray",
             anchor="w"
         )
         lbl_subtitle.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
 
-        # Section: CSV Selection
-        btn_select = ctk.CTkButton(
+        # Section: Load Ledger
+        btn_load = ctk.CTkButton(
             left_panel,
-            text="Browse Broker CSVs",
-            command=self._on_select_files,
+            text="Load Existing Ledger",
+            command=self._on_load_ledger,
             fg_color=COLOR_TEAL,
             hover_color=COLOR_TEAL_HOVER,
             font=ctk.CTkFont(weight="bold")
         )
-        btn_select.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
-
-        self.lbl_selected_status = ctk.CTkLabel(
-            left_panel,
-            text="No broker CSV files selected.",
-            font=ctk.CTkFont(size=11),
-            text_color="gray",
-            anchor="w"
-        )
-        self.lbl_selected_status.grid(row=3, column=0, padx=20, pady=(0, 15), sticky="ew")
-
-        # Section: Merging Options
-        self.chk_merge_var = ctk.StringVar(value="off")
-        self.chk_merge = ctk.CTkCheckBox(
-            left_panel,
-            text="Merge with existing ledger",
-            command=self._toggle_merge_ledger,
-            variable=self.chk_merge_var,
-            onvalue="on",
-            offvalue="off"
-        )
-        self.chk_merge.grid(row=4, column=0, padx=20, pady=5, sticky="w")
-
-        self.btn_select_ledger = ctk.CTkButton(
-            left_panel,
-            text="Select Existing Ledger CSV",
-            command=self._on_select_existing_ledger,
-            state="disabled",
-            fg_color="gray40",
-            hover_color="gray30"
-        )
-        self.btn_select_ledger.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
+        btn_load.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
 
         self.lbl_ledger_status = ctk.CTkLabel(
             left_panel,
-            text="No ledger selected.",
+            text="No ledger loaded.",
             font=ctk.CTkFont(size=11),
             text_color="gray",
             anchor="w"
         )
-        self.lbl_ledger_status.grid(row=6, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.lbl_ledger_status.grid(row=3, column=0, padx=20, pady=(0, 15), sticky="ew")
 
-        # Section: Actions
-        self.btn_process = ctk.CTkButton(
+        # Section: Import Raw CSV
+        btn_import = ctk.CTkButton(
             left_panel,
-            text="Consolidate & Calculate",
-            command=self._on_process,
+            text="Import Raw CSV",
+            command=self._on_import_csv,
+            fg_color=COLOR_TEAL,
+            hover_color=COLOR_TEAL_HOVER,
+            font=ctk.CTkFont(weight="bold")
+        )
+        btn_import.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
+
+        self.lbl_import_status = ctk.CTkLabel(
+            left_panel,
+            text="Import a Sharesight trade history CSV.",
+            font=ctk.CTkFont(size=11),
+            text_color="gray",
+            anchor="w"
+        )
+        self.lbl_import_status.grid(row=5, column=0, padx=20, pady=(0, 15), sticky="ew")
+
+        # Section: Recalculate
+        self.btn_recalc = ctk.CTkButton(
+            left_panel,
+            text="Recalculate Holdings & CGT",
+            command=self._on_recalculate,
             state="disabled",
             font=ctk.CTkFont(size=14, weight="bold"),
             height=36
         )
-        self.btn_process.grid(row=7, column=0, padx=20, pady=10, sticky="ew")
+        self.btn_recalc.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
 
         # Down at the bottom: Save Button
         self.btn_save = ctk.CTkButton(
@@ -301,7 +143,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
             height=36
         )
-        self.btn_save.grid(row=9, column=0, padx=20, pady=(10, 20), sticky="ew")
+        self.btn_save.grid(row=8, column=0, padx=20, pady=(10, 20), sticky="ew")
 
         # ---------------------------------------------------------------------
         # RIGHT DISPLAY PANEL
@@ -369,7 +211,7 @@ class App(ctk.CTk):
         # Status Bar
         self.lbl_status = ctk.CTkLabel(
             right_panel,
-            text="Ready. Select broker CSV files to begin, or add manual trades.",
+            text="Ready. Load an existing ledger or add manual trades.",
             font=ctk.CTkFont(size=12),
             anchor="w"
         )
@@ -464,42 +306,96 @@ class App(ctk.CTk):
         self.txt_manual_logs.configure(state="disabled")
 
     # ----- Callbacks & Event Handlers ----------------------------------------
-    def _on_select_files(self) -> None:
-        paths = filedialog.askopenfilenames(
-            title="Select Broker CSV Files",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        if not paths:
-            return
-
-        self._selected_files = list(paths)
-        filename_summary = ", ".join(os.path.basename(p) for p in self._selected_files)
-        if len(filename_summary) > 40:
-            filename_summary = f"{len(self._selected_files)} CSV files selected"
-        
-        self.lbl_selected_status.configure(text=filename_summary, text_color="white")
-        self.btn_process.configure(state="normal")
-        self._clear_displays()
-
-    def _toggle_merge_ledger(self) -> None:
-        if self.chk_merge_var.get() == "on":
-            self.btn_select_ledger.configure(state="normal", fg_color=COLOR_TEAL, hover_color=COLOR_TEAL_HOVER)
-        else:
-            self.btn_select_ledger.configure(state="disabled", fg_color="gray40", hover_color="gray30")
-            self._existing_ledger_path = ""
-            self.lbl_ledger_status.configure(text="No ledger selected.", text_color="gray")
-        self._clear_displays()
-
-    def _on_select_existing_ledger(self) -> None:
+    def _on_load_ledger(self) -> None:
+        """Load an existing master ledger CSV file."""
         path = filedialog.askopenfilename(
-            title="Select Existing Master Ledger",
-            filetypes=[("CSV files", "*.csv")]
+            title="Select Master Ledger CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
         if not path:
             return
-        self._existing_ledger_path = path
-        self.lbl_ledger_status.configure(text=os.path.basename(path), text_color="white")
-        self._clear_displays()
+
+        try:
+            self._master_df = load_existing_master(path)
+        except Exception as exc:
+            self._show_error(f"Failed to load ledger: {exc}")
+            return
+
+        if self._master_df.empty:
+            self.lbl_ledger_status.configure(text=f"Loaded (empty): {os.path.basename(path)}", text_color="yellow")
+            self.lbl_status.configure(text="Ledger loaded but contains no transactions.", text_color="yellow")
+        else:
+            self.lbl_ledger_status.configure(text=f"{os.path.basename(path)} ({len(self._master_df)} rows)", text_color="white")
+            self.lbl_status.configure(text=f"Loaded {len(self._master_df)} transactions from {os.path.basename(path)}.", text_color="white")
+
+        # Recalculate
+        self._recalculate_and_refresh()
+        self.btn_save.configure(state="normal")
+        self.btn_recalc.configure(state="normal")
+
+    def _on_import_csv(self) -> None:
+        """Import a raw trade history CSV (Sharesight format) into the ledger."""
+        path = filedialog.askopenfilename(
+            title="Select Raw Trade History CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+
+        imported_df, row_count, warnings = import_raw_csv(path)
+
+        if row_count == 0:
+            warn_text = "; ".join(warnings) if warnings else "No transactions found."
+            self.lbl_import_status.configure(text=f"Import failed: {warn_text}", text_color="red")
+            self._show_error(f"Import failed: {warn_text}")
+            return
+
+        # Merge with existing in-memory ledger if present
+        if self._master_df is not None and not self._master_df.empty:
+            self._master_df = pd.concat([self._master_df, imported_df], ignore_index=True)
+            self._master_df = self._master_df.drop_duplicates(subset=DEDUP_SUBSET, keep="first")
+            self._master_df = self._master_df.sort_values("Date").reset_index(drop=True)
+            self._master_df = self._master_df[MASTER_COLUMNS]
+        else:
+            self._master_df = imported_df
+
+        # Update status
+        warn_suffix = f" ({len(warnings)} warnings)" if warnings else ""
+        self.lbl_import_status.configure(
+            text=f"Imported {row_count} rows from {os.path.basename(path)}{warn_suffix}",
+            text_color="white"
+        )
+        self.lbl_status.configure(
+            text=f"Imported {row_count} transactions. Total ledger: {len(self._master_df)} rows.",
+            text_color="white"
+        )
+
+        # Show warnings if any
+        for w in warnings:
+            self._log_manual_action(f"[IMPORT] {w}")
+
+        self._recalculate_and_refresh()
+        self.btn_save.configure(state="normal")
+        self.btn_recalc.configure(state="normal")
+
+    def _on_recalculate(self) -> None:
+        """Recalculate holdings and CGT from the current in-memory ledger."""
+        if self._master_df is None or self._master_df.empty:
+            self._show_error("No ledger data to recalculate.")
+            return
+        self._recalculate_and_refresh()
+        self.lbl_status.configure(text="Recalculation complete.", text_color="white")
+
+    def _recalculate_and_refresh(self) -> None:
+        """Run tax calculations and update all display views."""
+        if self._master_df is not None and not self._master_df.empty:
+            tracker = PortfolioTracker(self._master_df)
+            self._holdings_df = tracker.get_holdings_summary()
+            self._cgt_df = tracker.get_cgt_report()
+        else:
+            self._holdings_df = None
+            self._cgt_df = None
+        self._refresh_tab_views()
 
     def _clear_displays(self) -> None:
         self.btn_save.configure(state="disabled")
@@ -529,122 +425,8 @@ class App(ctk.CTk):
         self.txt_manual_logs.insert("end", f"[{pd.Timestamp.now().strftime('%H:%M:%S')}] {message}\n")
         self.txt_manual_logs.configure(state="disabled")
 
-    def _on_process(self) -> None:
-        self.btn_process.configure(state="disabled")
-        self.lbl_status.configure(text="Inspecting broker files...")
-        
-        # We check for unrecognized CSVs on the main thread so we can show modal popups
-        broker_mappings = load_broker_mappings()
-        custom_mappings = {}
-        
-        for filepath in self._selected_files:
-            try:
-                # Guess header row and see if it can be identified
-                skip = find_header_row(filepath, broker_mappings)
-                df_temp = pd.read_csv(filepath, skiprows=skip, nrows=2, encoding="utf-8-sig", on_bad_lines="skip")
-                result = identify_broker(df_temp.columns.tolist(), broker_mappings)
-                if result is not None:
-                    continue
-            except Exception:
-                pass
-            
-            # Show interactive dialog for unrecognized columns
-            dialog = ColumnMappingDialog(self, filepath)
-            self.wait_window(dialog)
-            
-            if dialog.result_mapping:
-                custom_mappings[filepath] = dialog.result_mapping
-            else:
-                # Cancel clicked or dialog closed, abort
-                self.lbl_status.configure(text="Consolidation cancelled (mapping missing).", text_color="yellow")
-                self.btn_process.configure(state="normal")
-                return
-
-        # Trigger consolidator on background thread with custom mappings
-        self.lbl_status.configure(text="Processing transactions...")
-        threading.Thread(target=self._run_consolidation, args=(custom_mappings,), daemon=True).start()
-
-    def _run_consolidation(self, custom_mappings: dict) -> None:
-        # Process files
-        new_master, raw_count, dupes, warnings = process_csv_files(self._selected_files, custom_mappings)
-        
-        # Load existing ledger if requested
-        existing_master = pd.DataFrame(columns=MASTER_COLUMNS)
-        if self.chk_merge_var.get() == "on" and self._existing_ledger_path:
-            try:
-                existing_master = load_existing_master(self._existing_ledger_path)
-            except Exception as exc:
-                self.after(0, self._show_error, f"Failed to load existing ledger: {exc}")
-                return
-
-        # Combine
-        frames = []
-        if not existing_master.empty:
-            frames.append(existing_master)
-        if not new_master.empty:
-            frames.append(new_master)
-
-        if not frames:
-            self.after(0, self._show_error, "No transactions found or processed.")
-            return
-
-        final_master = pd.concat(frames, ignore_index=True)
-        total_raw = len(final_master)
-
-        # Deduplicate
-        final_master = final_master.drop_duplicates(subset=DEDUP_SUBSET, keep="first")
-        final_dupes_dropped = total_raw - len(final_master)
-
-        final_master = final_master.sort_values("Date").reset_index(drop=True)
-        final_master = final_master[MASTER_COLUMNS]
-
-        # Calculate taxes
-        tracker = PortfolioTracker(final_master)
-        holdings = tracker.get_holdings_summary()
-        cgt = tracker.get_cgt_report()
-
-        # Update GUI on main thread
-        self.after(
-            0,
-            self._on_processing_complete,
-            final_master,
-            holdings,
-            cgt,
-            raw_count,
-            dupes,
-            final_dupes_dropped,
-            warnings
-        )
-
     def _show_error(self, message: str) -> None:
         self.lbl_status.configure(text=f"Error: {message}", text_color="red")
-        self.btn_process.configure(state="normal")
-
-    def _on_processing_complete(
-        self,
-        master: pd.DataFrame,
-        holdings: pd.DataFrame,
-        cgt: pd.DataFrame,
-        raw_count: int,
-        dupes: int,
-        total_dupes_clean: int,
-        warnings: list[str]
-    ) -> None:
-        self._master_df = master
-        self._holdings_df = holdings
-        self._cgt_df = cgt
-
-        # Enable UI
-        self.btn_process.configure(state="normal")
-        self.btn_save.configure(state="normal")
-
-        self._refresh_tab_views()
-
-        # Status Message
-        status_msg = f"Consolidation done! New rows: {raw_count} | Duplicates removed: {dupes} | Total ledger size: {len(master)}"
-        if warnings:
-            status_msg += f" (Warnings: {len(warnings)})"
-        self.lbl_status.configure(text=status_msg, text_color="white")
 
     def _refresh_tab_views(self) -> None:
         """Repopulate text boxes and update dashboard stats from current memory state."""
@@ -763,13 +545,9 @@ class App(ctk.CTk):
         self._master_df = self._master_df[MASTER_COLUMNS]
 
         # Recalculate tax
-        tracker = PortfolioTracker(self._master_df)
-        self._holdings_df = tracker.get_holdings_summary()
-        self._cgt_df = tracker.get_cgt_report()
-
-        # Update display
-        self._refresh_tab_views()
+        self._recalculate_and_refresh()
         self.btn_save.configure(state="normal")
+        self.btn_recalc.configure(state="normal")
 
         # Logging
         log_msg = f"Added {units} units of {ticker} @ ${price:.2f} ({trans_type}) via {broker}"
