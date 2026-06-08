@@ -36,7 +36,7 @@ DEDUP_SUBSET = ["Date", "Ticker", "Units", "Price", "Type", "Broker"]
 
 # Standardized transaction types
 BUY_TYPES = {"BUY", "DRP", "DIVIDEND REINVESTMENT", "REINVESTMENT", "DIVIDEND REINVESTMENT PLAN", "PURCHASE"}
-SELL_TYPES = {"SELL", "SALE", "DISPOSAL", "DISPOSE"}
+SELL_TYPES = {"SELL", "SALE", "DISPOSAL", "DISPOSE", "CANCELLATION"}
 
 def load_broker_mappings() -> dict:
     """Load broker configurations from brokers.json config file."""
