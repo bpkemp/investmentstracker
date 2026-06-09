@@ -41,25 +41,23 @@ class App(ctk.CTk):
         self.minsize(900, 550)
 
         # State Variables
-        self.state = AppState()
-
-    @property
-    def _master_df(self): return self.state.master_df
-    @_master_df.setter
-    def _master_df(self, val): self.state.master_df = val
-
-    @property
-    def _holdings_df(self): return self.state.holdings_df
-    @_holdings_df.setter
-    def _holdings_df(self, val): self.state.holdings_df = val
-
-    @property
-    def _cgt_df(self): return self.state.cgt_df
-    @_cgt_df.setter
-    def _cgt_df(self, val): self.state.cgt_df = val
-
+        self.app_state = AppState()
         self._build_ui()
 
+    @property
+    def _master_df(self): return self.app_state.master_df
+    @_master_df.setter
+    def _master_df(self, val): self.app_state.master_df = val
+
+    @property
+    def _holdings_df(self): return self.app_state.holdings_df
+    @_holdings_df.setter
+    def _holdings_df(self, val): self.app_state.holdings_df = val
+
+    @property
+    def _cgt_df(self): return self.app_state.cgt_df
+    @_cgt_df.setter
+    def _cgt_df(self, val): self.app_state.cgt_df = val
     def _build_ui(self) -> None:
         # Configure Grid layout (1 row, 2 columns: Left control panel, Right display panel)
         self.grid_columnconfigure(0, weight=0, minsize=320)
