@@ -13,22 +13,20 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import pandas as pd
 
+from portfolio_tracker.core.utils import standardise_ticker
 from portfolio_tracker.core.consolidator import (
     load_existing_master,
     import_raw_csv,
-    standardise_ticker,
     DEDUP_SUBSET,
     MASTER_COLUMNS
 )
 from portfolio_tracker.core.tax import PortfolioTracker
-
-# GUI Custom Palette
-COLOR_TEAL = "#13B4B1"
-COLOR_TEAL_HOVER = "#0A7377"
-COLOR_GREEN = "#2CA58D"
-COLOR_GREEN_HOVER = "#1E7F6B"
-COLOR_BG_DARK = "#1E1E24"
-COLOR_CARD_DARK = "#282830"
+from portfolio_tracker.gui.constants import (
+    COLOR_TEAL, COLOR_TEAL_HOVER, COLOR_GREEN, 
+    COLOR_GREEN_HOVER, COLOR_BG_DARK, COLOR_CARD_DARK
+)
+from portfolio_tracker.gui.state import AppState
+from portfolio_tracker.gui.tabs.manual_entry import build_manual_entry_tab
 
 
 class App(ctk.CTk):
@@ -43,9 +41,22 @@ class App(ctk.CTk):
         self.minsize(900, 550)
 
         # State Variables
-        self._master_df: pd.DataFrame | None = None
-        self._holdings_df: pd.DataFrame | None = None
-        self._cgt_df: pd.DataFrame | None = None
+        self.state = AppState()
+
+    @property
+    def _master_df(self): return self.state.master_df
+    @_master_df.setter
+    def _master_df(self, val): self.state.master_df = val
+
+    @property
+    def _holdings_df(self): return self.state.holdings_df
+    @_holdings_df.setter
+    def _holdings_df(self, val): self.state.holdings_df = val
+
+    @property
+    def _cgt_df(self): return self.state.cgt_df
+    @_cgt_df.setter
+    def _cgt_df(self, val): self.state.cgt_df = val
 
         self._build_ui()
 
@@ -206,7 +217,7 @@ class App(ctk.CTk):
         self.txt_cgt.configure(state="disabled")
 
         # Setup manual entry UI
-        self._build_manual_entry_tab()
+        build_manual_entry_tab(self)
 
         # Status Bar
         self.lbl_status = ctk.CTkLabel(
@@ -217,93 +228,7 @@ class App(ctk.CTk):
         )
         self.lbl_status.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
 
-    def _build_manual_entry_tab(self) -> None:
-        """Create split layout inside manual entry tab (Form + Log list)."""
-        tab_me = self.tabview.tab("Manual Entry")
-        tab_me.grid_columnconfigure(0, weight=0, minsize=320)
-        tab_me.grid_columnconfigure(1, weight=1)
-        tab_me.grid_rowconfigure(0, weight=1)
 
-        # Left Column - Form Container
-        frm_form = ctk.CTkFrame(tab_me, fg_color="transparent")
-        frm_form.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        frm_form.grid_columnconfigure(1, weight=1)
-
-        # Form Fields
-        labels = ["Date (YYYY-MM-DD):", "Ticker (e.g. CBA):", "Type:", "Units:", "Price ($):", "Brokerage ($):", "Broker:"]
-        self.me_fields: dict[str, ctk.CTkEntry | ctk.CTkOptionMenu] = {}
-
-        # Date input with default
-        ctk.CTkLabel(frm_form, text=labels[0]).grid(row=0, column=0, padx=10, pady=6, sticky="w")
-        ent_date = ctk.CTkEntry(frm_form, placeholder_text="e.g. 2026-06-07")
-        ent_date.insert(0, pd.Timestamp.now().strftime("%Y-%m-%d"))
-        ent_date.grid(row=0, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Date"] = ent_date
-
-        # Ticker input
-        ctk.CTkLabel(frm_form, text=labels[1]).grid(row=1, column=0, padx=10, pady=6, sticky="w")
-        ent_ticker = ctk.CTkEntry(frm_form, placeholder_text="e.g. CBA")
-        ent_ticker.grid(row=1, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Ticker"] = ent_ticker
-
-        # Type drop down
-        ctk.CTkLabel(frm_form, text=labels[2]).grid(row=2, column=0, padx=10, pady=6, sticky="w")
-        opt_type = ctk.CTkOptionMenu(frm_form, values=["Buy", "Sell"], fg_color=COLOR_CARD_DARK)
-        opt_type.grid(row=2, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Type"] = opt_type
-
-        # Units input
-        ctk.CTkLabel(frm_form, text=labels[3]).grid(row=3, column=0, padx=10, pady=6, sticky="w")
-        ent_units = ctk.CTkEntry(frm_form, placeholder_text="e.g. 50.0")
-        ent_units.grid(row=3, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Units"] = ent_units
-
-        # Price input
-        ctk.CTkLabel(frm_form, text=labels[4]).grid(row=4, column=0, padx=10, pady=6, sticky="w")
-        ent_price = ctk.CTkEntry(frm_form, placeholder_text="e.g. 102.50")
-        ent_price.grid(row=4, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Price"] = ent_price
-
-        # Brokerage input
-        ctk.CTkLabel(frm_form, text=labels[5]).grid(row=5, column=0, padx=10, pady=6, sticky="w")
-        ent_brokerage = ctk.CTkEntry(frm_form, placeholder_text="e.g. 9.90 (default 0)")
-        ent_brokerage.grid(row=5, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Brokerage"] = ent_brokerage
-
-        # Broker input
-        ctk.CTkLabel(frm_form, text=labels[6]).grid(row=6, column=0, padx=10, pady=6, sticky="w")
-        ent_broker = ctk.CTkEntry(frm_form, placeholder_text="e.g. CMC (default MANUAL)")
-        ent_broker.grid(row=6, column=1, padx=10, pady=6, sticky="ew")
-        self.me_fields["Broker"] = ent_broker
-
-        # Add Row Button
-        btn_add = ctk.CTkButton(
-            frm_form,
-            text="Add to Ledger",
-            command=self._on_add_manual_row,
-            fg_color=COLOR_TEAL,
-            hover_color=COLOR_TEAL_HOVER,
-            font=ctk.CTkFont(weight="bold")
-        )
-        btn_add.grid(row=7, column=0, columnspan=2, padx=10, pady=20, sticky="ew")
-
-        # Right Column - Session Logs Container
-        frm_log = ctk.CTkFrame(tab_me, fg_color=COLOR_CARD_DARK)
-        frm_log.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-        frm_log.grid_columnconfigure(0, weight=1)
-        frm_log.grid_rowconfigure(1, weight=1)
-
-        lbl_log_title = ctk.CTkLabel(
-            frm_log,
-            text="Session Manual Logs:",
-            font=ctk.CTkFont(size=12, weight="bold")
-        )
-        lbl_log_title.grid(row=0, column=0, padx=15, pady=8, sticky="w")
-
-        self.txt_manual_logs = ctk.CTkTextbox(frm_log, wrap="none", font=ctk.CTkFont(family="Courier", size=11))
-        self.txt_manual_logs.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="nsew")
-        self.txt_manual_logs.insert("1.0", "--- Form logs will appear here ---")
-        self.txt_manual_logs.configure(state="disabled")
 
     # ----- Callbacks & Event Handlers ----------------------------------------
     def _on_load_ledger(self) -> None:

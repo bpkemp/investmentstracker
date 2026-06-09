@@ -8,18 +8,12 @@ Tracks stock parcels using First-In-First-Out (FIFO) logic to calculate:
 """
 
 import os
-import sys
 import json
+import collections
 import pandas as pd
-
-def get_config_path(filename: str) -> str:
-    """Get absolute path to config file, works for dev and for PyInstaller"""
-    if hasattr(sys, '_MEIPASS'):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, "config", filename)
 from datetime import datetime
+
+from portfolio_tracker.core.utils import get_config_path
 
 def load_cpi_data() -> dict[str, float]:
     """Load quarterly CPI data from config/cpi.json."""
@@ -58,9 +52,9 @@ class PortfolioTracker:
         # Load inflation indices
         self.cpi_data = load_cpi_data()
         
-        # Ticker -> list of parcels. 
+        # Ticker -> deque of parcels. 
         # A parcel is: {"date": Timestamp, "units": float, "price": float, "brokerage": float, "total_cost": float}
-        self.holdings: dict[str, list[dict]] = {}
+        self.holdings: dict[str, collections.deque[dict]] = {}
         
         # List of CGT events
         self.cgt_events: list[dict] = []
@@ -69,18 +63,18 @@ class PortfolioTracker:
 
     def _process_ledger(self) -> None:
         """Iterate through chronological transactions and build holdings/CGT history."""
-        for _, row in self.ledger.iterrows():
-            ticker = row["Ticker"]
-            trans_type = row["Type"]
-            date = row["Date"]
-            units = float(row["Units"])
-            price = float(row["Price"])
-            brokerage = float(row["Brokerage"])
-            broker = row["Broker"]
-            total_cost = float(row["Total_Cost"])
+        for row in self.ledger.itertuples(index=False):
+            ticker = row.Ticker
+            trans_type = row.Type
+            date = row.Date
+            units = float(row.Units)
+            price = float(row.Price)
+            brokerage = float(row.Brokerage)
+            broker = row.Broker
+            total_cost = float(row.Total_Cost)
 
             if ticker not in self.holdings:
-                self.holdings[ticker] = []
+                self.holdings[ticker] = collections.deque()
 
             if trans_type == "Buy":
                 self.holdings[ticker].append({
@@ -187,7 +181,7 @@ class PortfolioTracker:
                 oldest_parcel["total_cost"] -= matched_cost_base
                 remaining_to_sell = 0
             else:
-                self.holdings[ticker].pop(0)
+                self.holdings[ticker].popleft()
                 remaining_to_sell -= buy_units
 
         # Handle short-sale or missing buy parcel case

@@ -5,7 +5,7 @@ Unit Tests for Portfolio Tracker
 import os
 import pandas as pd
 from datetime import datetime
-from portfolio_tracker.core.consolidator import (
+from portfolio_tracker.core.utils import (
     clean_numeric,
     standardise_ticker,
     standardise_transaction_type,
